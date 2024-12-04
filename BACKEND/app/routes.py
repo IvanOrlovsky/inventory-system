@@ -209,56 +209,94 @@ def place_material_in_warehouse():
 def create_request():
     try:
         data = request.get_json()
+        
         client_id = data.get('client_id')
-        material_id = data.get('material_id')
-        date_of_creation = data.get('date_of_creation') 
+        materials_data = data.get('materials')  # Ожидаем массив объектов с материалами и количеством
 
-        if not client_id or not material_id or not date_of_creation:
-            return jsonify({"error": "Client ID, Material ID, and Date of Creation are required"}), 400
+        if not client_id or not materials_data:
+            return jsonify({"error": "Client ID, Materials are required"}), 400
 
         client = Client.query.get(client_id)
-        material = Material.query.get(material_id)
-
         if not client:
             return jsonify({"error": f"Client with ID {client_id} not found"}), 404
-        if not material:
-            return jsonify({"error": f"Material with ID {material_id} not found"}), 404
 
+        # Создание нового запроса
         new_request = Request(
             client_id=client_id,
-            material_id=material_id,
-            date_of_creation=date_of_creation
+            date_of_creation=datetime.now().date()
         )
         db.session.add(new_request)
-        db.session.commit()
+        db.session.commit()  # Сохраняем запрос без материалов для получения его ID
+
+        # Добавляем материалы с количеством в запрос
+        for material_data in materials_data:
+            material_id = material_data.get('material_id')
+            quantity = material_data.get('quantity')
+
+            # Проверяем, что материал существует
+            material = Material.query.get(material_id)
+            if not material:
+                return jsonify({"error": f"Material with ID {material_id} not found"}), 404
+
+            # Создаем запись в связи материал-количество
+            new_request_material = MaterialsInRequest(
+                request_id=new_request.id,
+                material_id=material_id,
+                quantity=quantity
+            )
+            db.session.add(new_request_material)
+
+        db.session.commit()  # Сохраняем все материалы
 
         return jsonify({
             "message": "Request successfully created",
-            "request": new_request.to_dict()
+            "request": new_request.to_dict(),
+            "materials": [material_data for material_data in materials_data]  # Возвращаем информацию о материалах
         }), 201
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
 # Принять запрос
 @app.route('/api/requests/<int:request_id>/accept', methods=['PUT'])
 def accept_request(request_id):
     try:
+        # Найти запрос по ID
         request_obj = Request.query.get(request_id)
         if not request_obj:
             return jsonify({"error": f"Request with ID {request_id} not found"}), 404
 
+        # Проверяем, что статус запроса "в работе"
         if request_obj.status != OrderStatus.INWORK:
             return jsonify({"error": "Request cannot be accepted as it is not 'INWORK'"}), 400
 
-        balance_entry = Balance.query.filter_by(material_id=request_obj.material_id).first()
-        if not balance_entry:
-            return jsonify({"error": "Material is not available in any warehouse section"}), 400
+        # Обрабатываем каждый материал в запросе
+        for material_in_request in request_obj.materials_in_request:
+            material_id = material_in_request.material_id
+            requested_quantity = material_in_request.quantity
 
-        db.session.delete(balance_entry)
+            # Проверить, есть ли материал в балансе
+            balance_entry = Balance.query.filter_by(material_id=material_id).first()
 
+            if not balance_entry:
+                return jsonify({"error": f"Material {material_id} is not available in any warehouse section"}), 400
+
+            # Проверяем, есть ли достаточно материала в балансе
+            if balance_entry.quantity < requested_quantity:
+                return jsonify({"error": f"Not enough quantity of material {material_id} in stock"}), 400
+
+            # Вычитаем количество материала из баланса
+            balance_entry.quantity -= requested_quantity
+
+            # Если после вычитания количество материала в балансе стало равно 0, удаляем запись
+            if balance_entry.quantity == 0:
+                db.session.delete(balance_entry)
+
+        # Обновляем статус запроса на "выдан"
         request_obj.status = OrderStatus.GIVEN
 
+        # Сохраняем изменения в базе данных
         db.session.commit()
 
         return jsonify({
@@ -268,6 +306,7 @@ def accept_request(request_id):
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
 
 # Получить все материалы для размещения
 @app.route('/api/materials/available-for-placing', methods=['GET'])
@@ -317,10 +356,6 @@ def get_materials_available_for_placing():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-
-
-
-
 # Отменить запрос
 @app.route('/api/requests/<int:request_id>/cancel', methods=['PUT'])
 def cancel_request(request_id):
@@ -338,7 +373,7 @@ def cancel_request(request_id):
         # Save the changes
         db.session.commit()
 
-        return jsonify({"message": f"Request with ID {request_id} has been canceled"}), 200
+        return jsonify({"message": f"Request with ID {request_id} has been canceled", "request": request_obj.to_dict()}), 200
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500

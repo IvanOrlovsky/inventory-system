@@ -453,3 +453,50 @@ def remove_material_from_section(section_id, material_id):
         return jsonify({"message": "Material removed from section"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/stock-report', methods=['GET'])
+def stock_report():
+    try:
+        # Получаем данные о материалах, их остатках, поставках, запросах
+        stock_data = db.session.query(
+            Material.name.label('material_name'),
+            WarehouseSection.name.label('section_name'),
+            db.func.sum(Balance.quantity).label('current_stock'),  # Текущий запас
+            db.func.coalesce(db.func.sum(MaterialsInSupply.quantity), 0).label('supplied'),  # Количество поставок
+            db.func.coalesce(db.func.sum(MaterialsInRequest.quantity), 0).label('requested'),  # Количество выданных материалов
+            Supplier.name.label('supplier_name'),
+            Client.name.label('client_name'),
+            Supply.date_of_creation.label('supply_date'),  # Оставляем дату в типе date
+            Request.date_of_creation.label('request_date')  # Оставляем дату в типе date
+        ) \
+        .join(Balance, Material.id == Balance.material_id) \
+        .join(WarehouseSection, WarehouseSection.id == Balance.warehouse_section_id) \
+        .join(MaterialsInSupply, Material.id == MaterialsInSupply.material_id, isouter=True) \
+        .join(Supply, Supply.id == MaterialsInSupply.supply_id, isouter=True) \
+        .join(Supplier, Supplier.id == Supply.supplier_id, isouter=True) \
+        .join(MaterialsInRequest, Material.id == MaterialsInRequest.material_id, isouter=True) \
+        .join(Request, Request.id == MaterialsInRequest.request_id, isouter=True) \
+        .join(Client, Client.id == Request.client_id, isouter=True) \
+        .group_by(Material.name, WarehouseSection.name, Supplier.name, Client.name, Supply.date_of_creation, Request.date_of_creation).all()
+
+        # Формируем данные для отдачи в ответе
+        return jsonify([{
+            'material_name': material_name,
+            'section_name': section_name,
+            'current_stock': current_stock,
+            'supplied': supplied,
+            'requested': requested,
+            'supply_details': [{
+                'supplier_name': supplier_name,
+                'supply_date': supply_date.strftime('%Y-%m-%d') if supply_date else None,  # Преобразуем только здесь
+            }] if supply_date else [],  # Если нет поставок, оставляем пустой список
+            'request_details': [{
+                'client_name': client_name,
+                'request_date': request_date.strftime('%Y-%m-%d') if request_date else None,  # Преобразуем только здесь
+            }] if request_date else [],  # Если нет запросов, оставляем пустой список
+        } for material_name, section_name, current_stock, supplied, requested, supplier_name, client_name, supply_date, request_date in stock_data])
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+

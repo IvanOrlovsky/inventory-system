@@ -4,7 +4,7 @@ import { BrowserRouter as Router, Routes, Route, Link } from "react-router-dom";
 import Placement from "./components/Placement";
 import Supplies from "./components/Supplies";
 import Requests from "./components/Requests";
-import Reports from "./components/Reports";
+import StockReport from "./components/StockReport";
 import Inventory from "./components/Inventory";
 
 const { Header, Content, Footer } = Layout;
@@ -27,7 +27,7 @@ const App = () => (
 						<Link to="/requests">Запросы на выдачу</Link>
 					</Menu.Item>
 					<Menu.Item key="5">
-						<Link to="/reports">Отчеты</Link>
+						<Link to="/reports">Отчет по запасам</Link>
 					</Menu.Item>
 				</Menu>
 			</Header>
@@ -36,7 +36,7 @@ const App = () => (
 					<Route path="/" element={<Supplies />} />
 					<Route path="/placement" element={<Placement />} />
 					<Route path="/requests" element={<Requests />} />
-					<Route path="/reports" element={<Reports />} />
+					<Route path="/reports" element={<StockReport />} />
 					<Route path="/inventory" element={<Inventory />} />
 				</Routes>
 			</Content>
